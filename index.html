@@ -101,7 +101,17 @@ nav a:hover,nav a:active{color:#fff;border-color:var(--card-b);background:var(--
 @keyframes pop{from{opacity:0;transform:scale(.96) translateY(12px)}}
 .apod-media{width:100%;border-radius:16px;overflow:hidden;border:1px solid var(--card-b);background:#000;
   box-shadow:0 0 40px rgba(155,107,255,.25)}
-.apod-media img{display:block;width:100%;height:auto}
+.apod-media{max-width:480px;margin:0 auto;position:relative}
+.apod-media img{display:block;width:100%;height:auto;max-height:300px;object-fit:contain;background:#000}
+.apod-media a.zl{display:block;cursor:zoom-in}
+.apod-media .zoom{position:absolute;right:10px;bottom:10px;display:flex;align-items:center;gap:6px;font-size:.74rem;font-weight:600;
+  padding:6px 11px;border-radius:99px;background:rgba(5,8,22,.78);border:1px solid var(--card-b);color:#fff;pointer-events:none;backdrop-filter:blur(6px)}
+.apod-media .zoom svg{width:14px;height:14px}
+.apod-media .ratio{padding-top:56.25%}
+.astro-photo{width:104px;height:104px;border-radius:50%;margin-bottom:12px;overflow:hidden;position:relative;
+  border:2px solid var(--cyan);box-shadow:var(--glow-c);background:linear-gradient(145deg,#2a1a7a,#0e3b66);
+  display:flex;align-items:center;justify-content:center;font-family:'Orbitron';font-size:1.5rem;color:#fff}
+.astro-photo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;animation:pop .6s ease both}
 .apod-media .ratio{position:relative;padding-top:56.25%}
 .apod-media iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .apod-date{margin-top:16px;color:var(--gold);font-weight:600;font-size:.9rem;display:flex;gap:8px;align-items:center}
@@ -420,6 +430,7 @@ footer .orb{color:var(--txt);font-size:1rem;margin-bottom:6px}
     <p class="sec-sub">Dois brasileiros já viajaram ao espaço — em missões bem diferentes.</p>
     <div class="astro-grid">
       <article class="glass astro">
+        <div class="astro-photo" data-name="Marcos Pontes"><span>MP</span></div>
         <span class="tag">1º brasileiro no espaço</span>
         <h3>Marcos Pontes</h3>
         <p class="sub">Astronauta e tenente-coronel da Força Aérea Brasileira · Missão Centenário (2006)</p>
@@ -431,6 +442,7 @@ footer .orb{color:var(--txt);font-size:1rem;margin-bottom:6px}
         </ul>
       </article>
       <article class="glass astro">
+        <div class="astro-photo" data-name="Victor Hespanha"><span>VH</span></div>
         <span class="tag">2º brasileiro no espaço</span>
         <h3>Victor Hespanha</h3>
         <p class="sub">Engenheiro de produção de Belo Horizonte (MG) · Missão NS-21 da Blue Origin (2022)</p>
@@ -486,7 +498,7 @@ footer .orb{color:var(--txt);font-size:1rem;margin-bottom:6px}
   <div class="wrap">
     <div class="orb">Planetário 2026 · Escola Américo Franco</div>
     <p>Edição 2026 · Feira de Ciências</p>
-    <p style="margin-top:10px">Imagens e dados: <a href="https://apod.nasa.gov" target="_blank" rel="noopener">NASA APOD</a> e <a href="https://api.nasa.gov" target="_blank" rel="noopener">NASA Open APIs</a>.<br>Site desenvolvido com carinho pela equipe organizadora do Planetário 2026.</p>
+    <p style="margin-top:10px">Fotos dos astronautas: Wikipédia/Wikimedia Commons. Imagens e dados: <a href="https://apod.nasa.gov" target="_blank" rel="noopener">NASA APOD</a> e <a href="https://api.nasa.gov" target="_blank" rel="noopener">NASA Open APIs</a>.<br>Site desenvolvido com carinho pela equipe organizadora do Planetário 2026.</p>
   </div>
 </footer>
 
@@ -615,14 +627,21 @@ async function fetchApod(date){
 
 // força https (evita imagem bloqueada por "conteúdo misto" quando o site está na Vercel)
 const https = u => (u || '').replace(/^http:\/\//i, 'https://');
-function apodImgErr(img){
-  const alt = img.dataset.alt;
-  if (alt && !img.dataset.tried){ img.dataset.tried = '1'; img.src = alt; return; }
+// Cadeia de fontes: 1) via proxy de imagens (evita bloqueio/logo da NASA), 2) link direto, 3) alta resolução
+const prox = u => 'https://wsrv.nl/?url=' + encodeURIComponent(u.replace(/^https?:\/\//, '')) + '&w=900&q=80';
+function apodNext(img){
+  const srcs = JSON.parse(img.dataset.srcs || '[]'); const i = +(img.dataset.i || 0) + 1;
+  if (i < srcs.length){ img.dataset.i = i; img.src = srcs[i]; return; }
   const box = img.closest('.apod-media');
   box.classList.remove('ok');
   box.innerHTML = `<div class="err" style="margin:14px">Não foi possível carregar a imagem aqui. <a href="${esc(img.dataset.link)}" target="_blank" rel="noopener">Abrir a imagem direto no site da NASA</a>.</div>`;
 }
-function apodImgOk(img){ img.closest('.apod-media').classList.add('ok'); }
+function apodImgErr(img){ apodNext(img); }
+function apodImgOk(img){
+  // imagem minúscula (ex.: logo/placeholder) não é a foto de verdade: tenta a próxima fonte
+  if (img.naturalWidth && img.naturalWidth < 200 && img.naturalHeight < 200 && +(img.dataset.i||0) < JSON.parse(img.dataset.srcs||'[]').length - 1){ apodNext(img); return; }
+  img.closest('.apod-media').classList.add('ok');
+}
 
 // Tradução gratuita (MyMemory) em blocos de até ~450 caracteres
 async function translate(text){
@@ -643,15 +662,16 @@ async function translate(text){
 
 function mediaHTML(d){
   const link = https(d.hdurl || d.url);
+  const zoom = `<span class="zoom"><i data-lucide="maximize-2"></i> Toque para ampliar</span>`;
+  const img = (srcs, alt) => `<div class="apod-media"><a class="zl" href="${esc(link)}" target="_blank" rel="noopener" aria-label="Abrir imagem em tamanho grande"><img src="${esc(srcs[0])}" data-srcs='${esc(JSON.stringify(srcs))}' data-i="0" data-link="${esc(link)}" alt="${esc(alt)}" referrerpolicy="no-referrer" onload="apodImgOk(this)" onerror="apodImgErr(this)"></a>${zoom}</div>`;
   if (d.media_type === 'image'){
-    // tenta a versão normal; se falhar, tenta a em alta resolução (e vice-versa)
-    const main = https(d.url), alt = d.hdurl ? https(d.hdurl) : '';
-    return `<div class="apod-media"><img src="${esc(main)}" data-alt="${esc(alt)}" data-link="${esc(link)}" alt="${esc(d.title)}" referrerpolicy="no-referrer" onload="apodImgOk(this)" onerror="apodImgErr(this)"></div>`;
+    const main = https(d.url), hd = d.hdurl ? https(d.hdurl) : '';
+    return img([prox(main), main, ...(hd ? [prox(hd), hd] : [])], d.title);
   }
   if (/youtube\.com|youtu\.be|vimeo/.test(d.url)){
     return `<div class="apod-media ok"><div class="ratio"><iframe src="${esc(https(d.url))}" title="${esc(d.title)}" allowfullscreen loading="lazy"></iframe></div></div>`;
   }
-  return d.thumbnail_url ? `<div class="apod-media"><img src="${esc(https(d.thumbnail_url))}" data-link="${esc(link)}" alt="${esc(d.title)}" referrerpolicy="no-referrer" onload="apodImgOk(this)" onerror="apodImgErr(this)"></div>` : '';
+  return d.thumbnail_url ? img([prox(https(d.thumbnail_url)), https(d.thumbnail_url)], d.title) : '';
 }
 
 async function showApod(date){
@@ -807,6 +827,34 @@ function renderQ(){
   }));
 }
 renderQ();
+
+/* ================= FOTOS DOS ASTRONAUTAS =================
+   Buscadas automaticamente na Wikipédia/Wikimedia Commons.
+   Para usar uma foto sua, coloque o arquivo na mesma pasta do site e preencha "photo" (ex.: photo:'marcos-pontes.jpg'). */
+const ASTRO = {
+  'Marcos Pontes':   {photo:'', q:'Marcos Pontes astronauta', must:'pontes'},
+  'Victor Hespanha': {photo:'', q:'Victor Hespanha', must:'hespanha'},
+};
+async function wikiPhoto(q, must){
+  for (const lang of ['pt', 'en']){
+    try{
+      const r = await fetch(`https://${lang}.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=4&prop=pageimages&piprop=thumbnail&pithumbsize=400`);
+      const j = await r.json();
+      const pages = Object.values(j.query?.pages || {}).sort((a, b) => a.index - b.index);
+      const p = pages.find(p => p.thumbnail && p.title.toLowerCase().includes(must));
+      if (p) return p.thumbnail.source;
+    }catch(e){}
+  }
+  return '';
+}
+document.querySelectorAll('.astro-photo').forEach(async el => {
+  const c = ASTRO[el.dataset.name]; if (!c) return;
+  const src = c.photo || await wikiPhoto(c.q, c.must);
+  if (!src) return; // sem foto: fica o avatar com as iniciais
+  const im = new Image(); im.alt = 'Foto de ' + el.dataset.name; im.referrerPolicy = 'no-referrer';
+  im.onload = () => el.appendChild(im);
+  im.src = src;
+});
 
 /* ================= VÍDEOS =================
    Canais brasileiros de divulgação científica.
